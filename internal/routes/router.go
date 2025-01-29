@@ -30,15 +30,14 @@ func RegisterRoutes(provider *factory.Provider) *gin.Engine {
 			v1.POST("/register", provider.AuthProvider.Register)
 			v1.POST("/login", provider.AuthProvider.Login)
 
-			auth := v1.Group("/users")
-			{
-				auth.Use(middleware.CheckAuth())
-				auth.GET("/", provider.UserProvider.GetAll)
-				auth.GET("/:id", provider.UserProvider.Detail)
-				auth.PUT("/manage", provider.UserProvider.Update)
-				auth.POST("/:id/borrow", provider.UserProvider.BorrowBook)
-				auth.POST("/:id/return", provider.UserProvider.ReturnBook)
-			}
+			admin := v1.Use(middleware.CheckAuthIsAdmin())
+			admin.GET("/users", provider.UserProvider.GetAll)
+			admin.GET("/users/:id", provider.UserProvider.Detail)
+			admin.PUT("/users/manage", provider.UserProvider.Update)
+
+			auth := v1.Use(middleware.CheckAuth())
+			auth.POST("/users/:id/borrow", provider.UserProvider.BorrowBook)
+			auth.POST("/users/:id/return", provider.UserProvider.ReturnBook)
 		}
 	}
 
