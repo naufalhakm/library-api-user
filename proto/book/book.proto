@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package book;
+
+option go_package = "library-api-user/proto/book";
+
+service BookService {
+  rpc DecreaseStock(DecreaseStockRequest) returns (DecreaseStockResponse);
+  rpc IncreaseStock(IncreaseStockRequest) returns (IncreaseStockResponse);
+}
+
+message DecreaseStockRequest {
+  uint64 book_id = 1;
+}
+
+message DecreaseStockResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message IncreaseStockRequest {
+  uint64 book_id = 1;
+}
+
+message IncreaseStockResponse {
+  bool success = 1;
+  string message = 2;
+}
