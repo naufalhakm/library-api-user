@@ -18,7 +18,7 @@ func main() {
 	config.LoadConfig()
 	psqlDB, err := database.NewPqSQLClient()
 	if err != nil {
-		log.Fatal("Could not connect to MySQL:", err)
+		log.Fatal("Could not connect to PqSQL:", err)
 	}
 
 	provider := factory.InitFactory(psqlDB)
