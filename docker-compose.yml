@@ -6,7 +6,7 @@ services:
     container_name: goservices-user
     image: naufalhakm/library-api-user:v2
     environment:
-      DB_HOST: 127.0.0.1
+      DB_HOST: postgres
       DB_PORT: 5432
       DB_USERNAME: user
       DB_PASSWORD: password
