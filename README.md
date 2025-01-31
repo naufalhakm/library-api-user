@@ -81,3 +81,8 @@ This microservice is built using:
    ```sh
    docker-compose up -d
    ```
+
+### Live Server
+
+The microservice is running at:
+http://35.240.139.186:8082/
