@@ -1,12 +1,12 @@
 version: "3.8"
 services:
 
-  goservices:
+  goservices-user:
     build: "."
-    container_name: goservices
-    image: naufalhakm/library-api-user:v1
+    container_name: goservices-user
+    image: naufalhakm/library-api-user:v2
     environment:
-      DB_HOST: postgres
+      DB_HOST: 127.0.0.1
       DB_PORT: 5432
       DB_USERNAME: user
       DB_PASSWORD: password
@@ -15,3 +15,8 @@ services:
       - "8082:8082"  # REST API
       - "50052:50052"  # gRPC
     restart: always
+
+networks:
+  default:
+    external:
+      name: nginx-proxy
