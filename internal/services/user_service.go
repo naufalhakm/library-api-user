@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"library-api-user/internal/commons/response"
 	"library-api-user/internal/grpc/client"
+	"library-api-user/internal/logger"
 	"library-api-user/internal/models"
 	"library-api-user/internal/params"
 	"library-api-user/internal/repositories"
@@ -28,35 +29,51 @@ type UserServiceImpl struct {
 	ActivityRepository repositories.UserActivityRepository
 	DB                 *sql.DB
 	BookClient         *client.BookClient
+	Logger             logger.Logger
 }
 
-func NewUserService(db *sql.DB, bookClient *client.BookClient, userRepository repositories.UserRepository, borrowRepository repositories.BorrowRepository, activityRepository repositories.UserActivityRepository) UserService {
+func NewUserService(db *sql.DB, bookClient *client.BookClient, userRepository repositories.UserRepository, borrowRepository repositories.BorrowRepository, activityRepository repositories.UserActivityRepository, log logger.Logger) UserService {
 	return &UserServiceImpl{
 		UserRepository:     userRepository,
 		BorrowRepository:   borrowRepository,
 		ActivityRepository: activityRepository,
 		DB:                 db,
 		BookClient:         bookClient,
+		Logger:             log,
 	}
 }
 
 func (service *UserServiceImpl) Detail(ctx context.Context, id uint64) (*params.UserResponse, *response.CustomError) {
 	tx, err := service.DB.Begin()
 	if err != nil {
-		return nil, response.GeneralError("Failed Connection to database errors: " + err.Error())
+		service.Logger.Error("[UserService] Failed to begin transaction - Detail", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil, response.GeneralError("Failed to begin transaction: " + err.Error())
 	}
 	defer func() {
-		err := recover()
-		if err != nil {
+		if r := recover(); r != nil {
 			tx.Rollback()
+			service.Logger.Error("[UserService] Transaction rolled back due to panic - Detail", map[string]interface{}{
+				"error": r,
+			})
+		} else if err != nil {
+			tx.Rollback()
+			service.Logger.Error("[UserService] Transaction rolled back due to error - Detail", map[string]interface{}{
+				"error": err.Error(),
+			})
 		} else {
 			tx.Commit()
 		}
 	}()
 
 	user, err := service.UserRepository.FindUserByID(ctx, tx, id)
-	if user == nil || err != nil {
-		return nil, response.BadRequestError("User is not found!")
+	if err != nil {
+		service.Logger.Error("[UserService] Failed to retrieve user by ID - Detail", map[string]interface{}{
+			"user_id": id,
+			"error":   err.Error(),
+		})
+		return nil, response.NotFoundError("User not found")
 	}
 
 	return &params.UserResponse{
@@ -70,7 +87,6 @@ func (service *UserServiceImpl) Detail(ctx context.Context, id uint64) (*params.
 	}, nil
 }
 
-// Login implements services.AuthSvc
 func (service *UserServiceImpl) Update(ctx context.Context, req *params.UserRequest, id uint64) *response.CustomError {
 	val := validator.New()
 	err := val.Struct(req)
@@ -78,34 +94,48 @@ func (service *UserServiceImpl) Update(ctx context.Context, req *params.UserRequ
 		validationErrors := err.(validator.ValidationErrors)
 		var errors []interface{}
 		for _, fieldError := range validationErrors {
-			error := "error " + fieldError.Field() + " on tag " + fieldError.Tag()
-			errors = append(errors, error)
+			errors = append(errors, fmt.Sprintf("error %s on tag %s", fieldError.Field(), fieldError.Tag()))
 		}
-		// service.Logger.Error("[UserService] Failed login request body", map[string]interface{}{
-		// 	"error": "Incoming request body that failed to validate.",
-		// })
+		service.Logger.Error("[UserService] Validation failed - Update", map[string]interface{}{
+			"error": errors,
+		})
 		return response.BadRequestErrorWithAdditionalInfo(errors)
 	}
+
 	tx, err := service.DB.Begin()
 	if err != nil {
-		return response.GeneralError("Failed Connection to database errors: " + err.Error())
+		service.Logger.Error("[UserService] Failed to begin transaction - Update", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return response.GeneralError("Failed to begin transaction: " + err.Error())
 	}
 	defer func() {
-		err := recover()
-		if err != nil {
+		if r := recover(); r != nil {
 			tx.Rollback()
+			service.Logger.Error("[UserService] Transaction rolled back due to panic - Update", map[string]interface{}{
+				"error": r,
+			})
+		} else if err != nil {
+			tx.Rollback()
+			service.Logger.Error("[UserService] Transaction rolled back due to error - Update", map[string]interface{}{
+				"error": err.Error(),
+			})
 		} else {
 			tx.Commit()
 		}
 	}()
 
-	usr, err := service.UserRepository.FindUserByID(ctx, tx, id)
-	if usr.Role == "admin" || err != nil {
-		return response.BadRequestError("User not compatible to manage.")
+	_, err = service.UserRepository.FindUserByID(ctx, tx, id)
+	if err != nil {
+		service.Logger.Error("[UserService] Failed to find user by ID - Update", map[string]interface{}{
+			"user_id": id,
+			"error":   err.Error(),
+		})
+		return response.NotFoundError("User not found")
 	}
 
 	user := models.User{
-		ID:        req.ID,
+		ID:        id,
 		Email:     req.Email,
 		Password:  req.Password,
 		Name:      req.Name,
@@ -115,10 +145,11 @@ func (service *UserServiceImpl) Update(ctx context.Context, req *params.UserRequ
 
 	err = service.UserRepository.UpdateUser(ctx, tx, &user)
 	if err != nil {
-		// service.Logger.Error("[UserService] Failed login user", map[string]interface{}{
-		// 	"error": "Search find user by email.",
-		// })
-		return response.BadRequestError("Failed update user!")
+		service.Logger.Error("[UserService] Failed to update user - Update", map[string]interface{}{
+			"user_id": id,
+			"error":   err.Error(),
+		})
+		return response.GeneralError("Failed to update user: " + err.Error())
 	}
 
 	return nil
@@ -127,12 +158,22 @@ func (service *UserServiceImpl) Update(ctx context.Context, req *params.UserRequ
 func (service *UserServiceImpl) GetAll(ctx context.Context, pagination *models.Pagination) ([]*params.UserResponse, *response.CustomError) {
 	tx, err := service.DB.Begin()
 	if err != nil {
-		return nil, response.GeneralError("Failed Connection to database errors: " + err.Error())
+		service.Logger.Error("[UserService] Failed to begin transaction - GetAll", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil, response.GeneralError("Failed to begin transaction: " + err.Error())
 	}
 	defer func() {
-		err := recover()
-		if err != nil {
+		if r := recover(); r != nil {
 			tx.Rollback()
+			service.Logger.Error("[UserService] Transaction rolled back due to panic - GetAll", map[string]interface{}{
+				"error": r,
+			})
+		} else if err != nil {
+			tx.Rollback()
+			service.Logger.Error("[UserService] Transaction rolled back due to error - GetAll", map[string]interface{}{
+				"error": err.Error(),
+			})
 		} else {
 			tx.Commit()
 		}
@@ -142,6 +183,9 @@ func (service *UserServiceImpl) GetAll(ctx context.Context, pagination *models.P
 
 	users, err := service.UserRepository.GetAllUsers(ctx, tx, pagination)
 	if err != nil {
+		service.Logger.Error("[UserService] Failed to fetch users - GetAll", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return nil, response.GeneralError("Failed to fetch users: " + err.Error())
 	}
 
@@ -166,21 +210,33 @@ func (service *UserServiceImpl) GetAll(ctx context.Context, pagination *models.P
 func (service *UserServiceImpl) BorrowBook(ctx context.Context, userID uint64, bookID uint64) *response.CustomError {
 	tx, err := service.DB.Begin()
 	if err != nil {
-		return response.GeneralError("Failed Connection to database errors: " + err.Error())
+		service.Logger.Error("[UserService] Failed to begin transaction - BorrowBook", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return response.GeneralError("Failed to begin transaction: " + err.Error())
 	}
 	defer func() {
-		err := recover()
-		if err != nil {
+		if r := recover(); r != nil {
 			tx.Rollback()
+			service.Logger.Error("[UserService] Transaction rolled back due to panic - BorrowBook", map[string]interface{}{
+				"error": r,
+			})
+		} else if err != nil {
+			tx.Rollback()
+			service.Logger.Error("[UserService] Transaction rolled back due to error - BorrowBook", map[string]interface{}{
+				"error": err.Error(),
+			})
 		} else {
 			tx.Commit()
 		}
 	}()
 
-	fmt.Println(userID)
-
 	err = service.BookClient.DecreaseStock(ctx, bookID)
 	if err != nil {
+		service.Logger.Error("[UserService] Failed to decrease book stock - BorrowBook", map[string]interface{}{
+			"book_id": bookID,
+			"error":   err.Error(),
+		})
 		return response.GeneralError("Failed to decrease book stock: " + err.Error())
 	}
 
@@ -191,6 +247,11 @@ func (service *UserServiceImpl) BorrowBook(ctx context.Context, userID uint64, b
 	}
 	err = service.BorrowRepository.CreateBorrow(ctx, tx, &borrowRecord)
 	if err != nil {
+		service.Logger.Error("[UserService] Failed to create borrow record - BorrowBook", map[string]interface{}{
+			"user_id": userID,
+			"book_id": bookID,
+			"error":   err.Error(),
+		})
 		return response.GeneralError("Failed to create borrow record: " + err.Error())
 	}
 
@@ -202,6 +263,11 @@ func (service *UserServiceImpl) BorrowBook(ctx context.Context, userID uint64, b
 	}
 	err = service.ActivityRepository.CreateActivity(ctx, tx, &userActivity)
 	if err != nil {
+		service.Logger.Error("[UserService] Failed to create user activity - BorrowBook", map[string]interface{}{
+			"user_id": userID,
+			"book_id": bookID,
+			"error":   err.Error(),
+		})
 		return response.GeneralError("Failed to create user activity: " + err.Error())
 	}
 
@@ -211,12 +277,22 @@ func (service *UserServiceImpl) BorrowBook(ctx context.Context, userID uint64, b
 func (service *UserServiceImpl) ReturnBook(ctx context.Context, userID uint64, bookID uint64) *response.CustomError {
 	tx, err := service.DB.Begin()
 	if err != nil {
-		return response.GeneralError("Failed Connection to database errors: " + err.Error())
+		service.Logger.Error("[UserService] Failed to begin transaction - ReturnBook", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return response.GeneralError("Failed to begin transaction: " + err.Error())
 	}
 	defer func() {
-		err := recover()
-		if err != nil {
+		if r := recover(); r != nil {
 			tx.Rollback()
+			service.Logger.Error("[UserService] Transaction rolled back due to panic - ReturnBook", map[string]interface{}{
+				"error": r,
+			})
+		} else if err != nil {
+			tx.Rollback()
+			service.Logger.Error("[UserService] Transaction rolled back due to error - ReturnBook", map[string]interface{}{
+				"error": err.Error(),
+			})
 		} else {
 			tx.Commit()
 		}
@@ -224,17 +300,31 @@ func (service *UserServiceImpl) ReturnBook(ctx context.Context, userID uint64, b
 
 	err = service.BookClient.IncreaseStock(ctx, bookID)
 	if err != nil {
+		service.Logger.Error("[UserService] Failed to increase book stock - ReturnBook", map[string]interface{}{
+			"book_id": bookID,
+			"error":   err.Error(),
+		})
 		return response.GeneralError("Failed to increase book stock: " + err.Error())
 	}
 
 	borrowRecord, err := service.BorrowRepository.FindBorrow(ctx, tx, userID, bookID)
 	if err != nil {
+		service.Logger.Error("[UserService] Failed to find borrow record - ReturnBook", map[string]interface{}{
+			"user_id": userID,
+			"book_id": bookID,
+			"error":   err.Error(),
+		})
 		return response.GeneralError("Failed to find borrow record: " + err.Error())
 	}
 
 	borrowRecord.ReturnedAt = time.Now()
 	err = service.BorrowRepository.UpdateBorrow(ctx, tx, borrowRecord)
 	if err != nil {
+		service.Logger.Error("[UserService] Failed to update borrow record - ReturnBook", map[string]interface{}{
+			"user_id": userID,
+			"book_id": bookID,
+			"error":   err.Error(),
+		})
 		return response.GeneralError("Failed to update borrow record: " + err.Error())
 	}
 
@@ -246,6 +336,11 @@ func (service *UserServiceImpl) ReturnBook(ctx context.Context, userID uint64, b
 	}
 	err = service.ActivityRepository.CreateActivity(ctx, tx, &userActivity)
 	if err != nil {
+		service.Logger.Error("[UserService] Failed to create user activity - ReturnBook", map[string]interface{}{
+			"user_id": userID,
+			"book_id": bookID,
+			"error":   err.Error(),
+		})
 		return response.GeneralError("Failed to create user activity: " + err.Error())
 	}
 

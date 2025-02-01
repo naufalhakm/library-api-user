@@ -4,7 +4,7 @@ services:
   goservices-user:
     build: "."
     container_name: goservices-user
-    image: naufalhakm/library-api-user:v2
+    # image: naufalhakm/library-api-user:v2
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
